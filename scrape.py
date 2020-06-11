@@ -8,10 +8,11 @@ import time
 import logging
 import os.path
 import datetime as dt
-import pandas as pd
+import csv
 logging.basicConfig(level=logging.INFO)
 
 BASE_URL = "https://forum.officer.com/"
+
 
 for d in ['scrape/','data/','scrape/author/']:
     try:
@@ -30,14 +31,15 @@ def get_html(url, author=False):
             try:
                 os.makedirs(parse_url(url)['dirpath'])
             except OSError:
-                print ("Creation of the directory %s failed" % parse_url(url)['dirpath'])
+                #print (f"{parse_url(url)['dirpath']} already exists")
+                print()
         else:
             path = 'scrape/author/'+parse_url(url)['title']+'.txt'
             
     if not os.path.isfile(path):
         r = requests.get(url)
         if r.ok:
-            print(f'writing data to {path}')
+            logging.info(f'writing data from {url} to {path}')
             fh = open(path, "bw")
             fh.write(r.content)
         else:
@@ -55,7 +57,7 @@ def parse_url(url):
     url_data['title'] = parts[-1]
     url_data['dirpath'] = 'scrape/'+('/'.join(parts[:-1]))
     url_data['filepath'] = url_data['dirpath']+"/"+url_data['title']+'.txt'
-    logging.info(f"URL data is: {url_data}")
+    #logging.info(f"URL data is: {url_data}")
     return url_data
 
 def get_forum_data():
@@ -64,7 +66,6 @@ def get_forum_data():
     p = HTMLParser(html)
     forums = p.css("tr.forum-item")
     forum_title_list = []
-    forumsdf = pd.DataFrame()
 
     # Process each tr node with a class name of "forum-item"
     for forum in forums:
@@ -89,14 +90,14 @@ def get_forum_data():
             lastpost_date_element = cell_lastpost.css_first("div.lastpost-date")
             lastpost_date_unformatted = lastpost_date_element.text()
             forum_data['lastpost_date'] = format_post_date(lastpost_date_unformatted)
-            logging.info(f"Forum data is: {forum_data}")
-            forumsdf = forumsdf.append(forum_data,ignore_index=True)
+            #logging.info(f"Forum data is: {forum_data}")
+            f = open('data/forums.csv','a')
+            writer = csv.writer(f, delimiter=',')
+            writer.writerow(forum_data.values())
+            f.close()
         except:
-            print('error scraping forum')
+            logging.info(f"Error getting forum data")
         get_topic_data(forum_data['url'])
-    
-    forumsdf.to_csv('data/forums.csv')
-        
     #return forum_title_list
         
 def get_subforum_data():
@@ -104,24 +105,27 @@ def get_subforum_data():
     html = open("scrape/_main.txt", "br").read()
     p = HTMLParser(html)
     subforum_lists = p.css("tr.subforum-list")
-    subforumsdf = pd.DataFrame()
     
     for subforum_list in subforum_lists:
         subforum_elements = subforum_list.css("div.subforum-info")
         for subforum_element in subforum_elements:
-            subforum_data = {}
-            subforum_title_element = subforum_element.css_first('a.subforum-title')
-            subforum_data['title'] = subforum_title_element.text()
-            subforum_data['url'] = subforum_title_element.attrs['href']
-            subforum_title_list.append(parse_url(subforum_data['url'])['forum'])
-            counts_text = subforum_element.css_first('span.counts').text()
-            counts = counts_text.replace('(','').replace(')','').replace(',','').split('/')
-            subforum_data['topics'] = counts[0]
-            subforum_data['posts'] = counts[1]
-            logging.info(f"Subforum data is: {subforum_data}")
-            subforumsdf = subforumsdf.append(subforum_data,ignore_index=True)
-            
-    subforumsdf.to_csv('data/subforums.csv')
+            try:
+                subforum_data = {}
+                subforum_title_element = subforum_element.css_first('a.subforum-title')
+                subforum_data['title'] = subforum_title_element.text()
+                subforum_data['url'] = subforum_title_element.attrs['href']
+                subforum_title_list.append(parse_url(subforum_data['url'])['forum'])
+                counts_text = subforum_element.css_first('span.counts').text()
+                counts = counts_text.replace('(','').replace(')','').replace(',','').split('/')
+                subforum_data['topics'] = counts[0]
+                subforum_data['posts'] = counts[1]
+                logging.info(f"Subforum data is: {subforum_data}")
+                f = open('data/subforums.csv','a')
+                writer = csv.writer(f, delimiter=',')
+                writer.writerow(subforum_data.values())
+                f.close()
+            except:
+                logging.info(f"Error getting subforum data")
     
 def get_topic_data(forum_url):
     local_path = parse_url(forum_url)['filepath']
@@ -129,7 +133,6 @@ def get_topic_data(forum_url):
     p = HTMLParser(html)
     threads = p.css("tr.topic-item")
     thread_list = []
-    threaddf = pd.DataFrame()
     
     for thread in threads:
         try:
@@ -149,12 +152,14 @@ def get_topic_data(forum_url):
             lastpost_date_unformatted = lastpost_date_element.text()
             thread_data['lastpost_date'] = format_post_date(lastpost_date_unformatted)
             logging.info(f"Thread data is: {thread_data}")
-            threaddf = threaddf.append(thread_data,ignore_index=True)
+            logging.info(f"Thread data values: {thread_data.values()}")
+            f = open('data/threads.csv','a')
+            writer = csv.writer(f, delimiter=',')
+            writer.writerow(thread_data.values())
+            f.close()
         except:
-            print(f'error scraping thread')
+            logging.info(f"Error getting thread data")
         get_post_data(thread_data['url'])
-        
-    threaddf.to_csv('data/threads.csv')
     
 def get_post_data(thread_url):
     print(f'getting post data from {thread_url}')
@@ -162,22 +167,24 @@ def get_post_data(thread_url):
     html = open(local_path, "br").read()
     p = HTMLParser(html)
     posts = p.css("li.b-post")
-    postdf = pd.DataFrame()
+    
     
     for post in posts:
         try:
             post_data = {}
-            post_data['content'] = post.css_first("div.b-post__content").text()
+            post_data['content'] = post.css_first("div.b-post__content").text().replace('\t','').replace('\n','')
             post_data['date'] = format_post_date(post.css_first("div.b-post__timestamp").text())
-            post_data['author'] = post.css_first("div.author").text()
+            post_data['author'] = post.css_first("div.author").text().replace('\t','').replace('\n','')
             post_data['author_url'] = post.css_first("div.author").css_first("a").attrs['href']
-            post_data['author_title'] = post.css_first("div.usertitle").text()
-            postdf = postdf.append(post_data,ignore_index=True)
+            post_data['author_title'] = post.css_first("div.usertitle").text().replace('\t','').replace('\n','')
+            logging.info(f"Post data values: {post_data.values()}")
+            f = open('data/posts.csv','a')
+            writer = csv.writer(f, delimiter=',')
+            writer.writerow(post_data.values())
+            f.close()
+            #get_html(post_data['author_url'],author=True)
         except:
-            print('error scraping post')
-        #get_html(post_data['author_url'],author=True)
-        
-    postdf.to_csv('data/posts.csv')
+            logging.info(f"Error getting post data")
 
 
 get_html(BASE_URL)
